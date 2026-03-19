@@ -192,7 +192,8 @@ func runStart() {
 }
 
 func runInit() {
-	fmt.Println("NeuKeiho init — generating configuration\n")
+	fmt.Println("NeuKeiho init — generating configuration")
+	fmt.Println()
 	reader := bufio.NewReader(os.Stdin)
 	prompt := func(label, def string) string {
 		fmt.Printf("  %s [%s]: ", label, def)
