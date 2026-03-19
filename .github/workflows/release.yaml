@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install gcc (required for go-sqlite3 CGO)
+        run: sudo apt-get install -y gcc
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build linux/amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 1
+        run: |
+          go build \
+            -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
+            -o dist/neukeiho-linux-amd64 \
+            ./cmd/neukeiho
+
+      - name: Build linux/arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 1
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          go build \
+            -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
+            -o dist/neukeiho-linux-arm64 \
+            ./cmd/neukeiho
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum neukeiho-linux-amd64 neukeiho-linux-arm64 > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NeuKeiho ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## NeuKeiho ${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+
+            **Controller (Linux amd64):**
+            ```bash
+            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-amd64
+            chmod +x neukeiho-linux-amd64
+            sudo mv neukeiho-linux-amd64 /usr/bin/neukeiho
+            neukeiho init
+            neukeiho start
+            ```
+
+            **Controller (Linux arm64):**
+            ```bash
+            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-arm64
+            chmod +x neukeiho-linux-arm64
+            sudo mv neukeiho-linux-arm64 /usr/bin/neukeiho
+            neukeiho init
+            neukeiho start
+            ```
+
+            ### Verify checksum
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+          files: |
+            dist/neukeiho-linux-amd64
+            dist/neukeiho-linux-arm64
+            dist/checksums.txt
+          draft: false
+          prerelease: false
