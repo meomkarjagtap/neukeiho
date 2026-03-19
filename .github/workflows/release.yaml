@@ -25,9 +25,17 @@ jobs:
       - name: Install gcc (required for go-sqlite3 CGO)
         run: sudo apt-get install -y gcc
 
+      - name: Tidy and download dependencies
+        run: |
+          go mod tidy
+          go mod download
+
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create dist directory
+        run: mkdir -p dist
 
       - name: Build linux/amd64
         env:
@@ -40,6 +48,9 @@ jobs:
             -o dist/neukeiho-linux-amd64 \
             ./cmd/neukeiho
 
+      - name: Install arm64 cross compiler
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build linux/arm64
         env:
           GOOS: linux
@@ -47,7 +58,6 @@ jobs:
           CGO_ENABLED: 1
           CC: aarch64-linux-gnu-gcc
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu
           go build \
             -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
             -o dist/neukeiho-linux-arm64 \
@@ -66,9 +76,7 @@ jobs:
           body: |
             ## NeuKeiho ${{ steps.version.outputs.VERSION }}
 
-            ### Installation
-
-            **Controller (Linux amd64):**
+            ### Install (Linux amd64)
             ```bash
             curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-amd64
             chmod +x neukeiho-linux-amd64
@@ -77,7 +85,7 @@ jobs:
             neukeiho start
             ```
 
-            **Controller (Linux arm64):**
+            ### Install (Linux arm64)
             ```bash
             curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-arm64
             chmod +x neukeiho-linux-arm64
