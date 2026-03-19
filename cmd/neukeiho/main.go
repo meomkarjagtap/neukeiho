@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +24,7 @@ const (
 	defaultConf = "/etc/neukeiho/neukeiho.conf"
 	defaultTOML = "/etc/neukeiho/neukeiho.toml"
 	version     = "v0.1.0"
+	githubRepo  = "meomkarjagtap/neukeiho"
 )
 
 func main() {
@@ -42,6 +46,8 @@ func main() {
 		runAsk()
 	case "test-alert":
 		runTestAlert()
+	case "update":
+		runUpdate()
 	case "version":
 		fmt.Println("neukeiho " + version)
 	default:
@@ -61,8 +67,11 @@ Usage:
   neukeiho status        Live view of all node metrics
   neukeiho ask "<q>"     Ask Ollama about your infra
   neukeiho test-alert    Fire a test alert to all configured channels
+  neukeiho update        Update to the latest version from GitHub
   neukeiho version       Print version`)
 }
+
+// ── start ─────────────────────────────────────────────────────────────────────
 
 func runStart() {
 	conf, tomlCfg := mustLoadConfig()
@@ -116,9 +125,9 @@ func runStart() {
 		Model:   conf.Ollama.Model,
 	})
 
-	// wire: breach → enrich → store → alert
+	// wire: breach/recovery → enrich → store → alert
 	thr.OnBreach = func(b threshold.Breach) {
-		log.Printf("[threshold] breach: %s", b.Message)
+		log.Printf("[threshold] %s: %s", b.Type, b.Message)
 		snapshot := col.Latest()
 		ollamaCtx := db.BuildOllamaContext(b.NodeID, snapshot)
 		enrichedMsg := ol.EnrichAlert(b.Message, snapshot)
@@ -190,6 +199,8 @@ func runStart() {
 		log.Fatalf("[neukeiho] server: %v", err)
 	}
 }
+
+// ── init ──────────────────────────────────────────────────────────────────────
 
 func runInit() {
 	fmt.Println("NeuKeiho init — generating configuration")
@@ -273,10 +284,14 @@ network_mbps   = 500.0
 	fmt.Println("   Then run: neukeiho start")
 }
 
+// ── deploy ────────────────────────────────────────────────────────────────────
+
 func runDeploy() {
 	fmt.Println("[neukeiho] running ansible-playbook deploy/ansible/playbook.yml")
 	fmt.Println("[neukeiho] ensure ansible is installed and neukeiho.toml nodes are configured")
 }
+
+// ── status ────────────────────────────────────────────────────────────────────
 
 func runStatus() {
 	conf, _ := mustLoadConfig()
@@ -290,6 +305,8 @@ func runStatus() {
 	fmt.Println(strings.Repeat("─", 70))
 	fmt.Println("(parse /status JSON and render rows)")
 }
+
+// ── ask ───────────────────────────────────────────────────────────────────────
 
 func runAsk() {
 	if len(os.Args) < 3 {
@@ -310,6 +327,8 @@ func runAsk() {
 	}
 	fmt.Println(answer)
 }
+
+// ── test-alert ────────────────────────────────────────────────────────────────
 
 func runTestAlert() {
 	_, tomlCfg := mustLoadConfig()
@@ -340,11 +359,138 @@ func runTestAlert() {
 		Metric:    "CPU",
 		Value:     99.9,
 		Threshold: 85,
+		Type:      threshold.BreachTypeAlert,
 		At:        time.Now(),
-		Message:   "[NeuKeiho] TEST ALERT — alerting is working correctly.",
+		Message:   "🔴 [NeuKeiho] TEST ALERT — alerting is working correctly.",
 	})
 	fmt.Println("[neukeiho] test alert dispatched to all enabled channels")
 }
+
+// ── update ────────────────────────────────────────────────────────────────────
+
+func runUpdate() {
+	fmt.Println("[neukeiho] checking for latest version...")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	req, _ := http.NewRequest("GET",
+		fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo), nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to check latest release: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse release info: %v\n", err)
+		os.Exit(1)
+	}
+
+	if release.TagName == version {
+		fmt.Printf("✅ already on latest version %s\n", version)
+		return
+	}
+
+	fmt.Printf("[neukeiho] new version available: %s (current: %s)\n", release.TagName, version)
+
+	// determine arch suffix
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "arm64"
+	case "arm":
+		arch = "arm"
+	default:
+		fmt.Fprintf(os.Stderr, "unsupported arch: %s\n", arch)
+		os.Exit(1)
+	}
+
+	assetName := fmt.Sprintf("neukeiho-%s-%s", release.TagName, arch)
+
+	var downloadURL string
+	for _, asset := range release.Assets {
+		if asset.Name == assetName {
+			downloadURL = asset.BrowserDownloadURL
+			break
+		}
+	}
+
+	if downloadURL == "" {
+		fmt.Fprintf(os.Stderr, "no binary found for arch %s in release %s\n", arch, release.TagName)
+		os.Exit(1)
+	}
+
+	fmt.Printf("[neukeiho] downloading %s...\n", assetName)
+
+	binResp, err := client.Get(downloadURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "download failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer binResp.Body.Close()
+
+	// write to temp file
+	tmpFile := "/tmp/neukeiho-update"
+	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp file: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := io.Copy(f, binResp.Body); err != nil {
+		f.Close()
+		fmt.Fprintf(os.Stderr, "failed to write binary: %v\n", err)
+		os.Exit(1)
+	}
+	f.Close()
+
+	// find current binary path
+	currentBin, err := os.Executable()
+	if err != nil {
+		currentBin = "/usr/bin/neukeiho"
+	}
+
+	// try rename first (same filesystem), fallback to copy
+	if err := os.Rename(tmpFile, currentBin); err != nil {
+		if err := copyFile(tmpFile, currentBin); err != nil {
+			fmt.Fprintf(os.Stderr, "update failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Remove(tmpFile)
+	}
+
+	fmt.Printf("✅ updated to %s — restart neukeiho to apply:\n", release.TagName)
+	fmt.Println("   sudo pkill -f 'neukeiho start'")
+	fmt.Println("   sudo nohup neukeiho start > /var/log/neukeiho/neukeiho.log 2>&1 &")
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 func mustLoadConfig() (*config.Conf, *config.TOML) {
 	conf, err := config.LoadConf(defaultConf)
