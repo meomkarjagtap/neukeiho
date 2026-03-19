@@ -22,8 +22,13 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Install gcc (required for go-sqlite3 CGO)
-        run: sudo apt-get install -y gcc
+      - name: Install cross compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf
 
       - name: Tidy and download dependencies
         run: |
@@ -37,19 +42,17 @@ jobs:
       - name: Create dist directory
         run: mkdir -p dist
 
-      - name: Build linux/amd64
+      - name: Build linux/amd64 (x86_64)
         env:
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: 1
+          CC: gcc
         run: |
           go build \
             -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
-            -o dist/neukeiho-linux-amd64 \
+            -o dist/neukeiho-${{ steps.version.outputs.VERSION }}-x86_64 \
             ./cmd/neukeiho
-
-      - name: Install arm64 cross compiler
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build linux/arm64
         env:
@@ -60,13 +63,30 @@ jobs:
         run: |
           go build \
             -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
-            -o dist/neukeiho-linux-arm64 \
+            -o dist/neukeiho-${{ steps.version.outputs.VERSION }}-arm64 \
+            ./cmd/neukeiho
+
+      - name: Build linux/arm (armv7)
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: 7
+          CGO_ENABLED: 1
+          CC: arm-linux-gnueabihf-gcc
+        run: |
+          go build \
+            -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -s -w" \
+            -o dist/neukeiho-${{ steps.version.outputs.VERSION }}-arm \
             ./cmd/neukeiho
 
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum neukeiho-linux-amd64 neukeiho-linux-arm64 > checksums.txt
+          sha256sum \
+            neukeiho-${{ steps.version.outputs.VERSION }}-x86_64 \
+            neukeiho-${{ steps.version.outputs.VERSION }}-arm64 \
+            neukeiho-${{ steps.version.outputs.VERSION }}-arm \
+            > checksums.txt
           cat checksums.txt
 
       - name: Create GitHub Release
@@ -76,20 +96,29 @@ jobs:
           body: |
             ## NeuKeiho ${{ steps.version.outputs.VERSION }}
 
-            ### Install (Linux amd64)
+            ### Install (Linux x86_64)
             ```bash
-            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-amd64
-            chmod +x neukeiho-linux-amd64
-            sudo mv neukeiho-linux-amd64 /usr/bin/neukeiho
+            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-${{ steps.version.outputs.VERSION }}-x86_64
+            chmod +x neukeiho-${{ steps.version.outputs.VERSION }}-x86_64
+            sudo mv neukeiho-${{ steps.version.outputs.VERSION }}-x86_64 /usr/bin/neukeiho
             neukeiho init
             neukeiho start
             ```
 
             ### Install (Linux arm64)
             ```bash
-            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-linux-arm64
-            chmod +x neukeiho-linux-arm64
-            sudo mv neukeiho-linux-arm64 /usr/bin/neukeiho
+            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-${{ steps.version.outputs.VERSION }}-arm64
+            chmod +x neukeiho-${{ steps.version.outputs.VERSION }}-arm64
+            sudo mv neukeiho-${{ steps.version.outputs.VERSION }}-arm64 /usr/bin/neukeiho
+            neukeiho init
+            neukeiho start
+            ```
+
+            ### Install (Linux arm / armv7)
+            ```bash
+            curl -LO https://github.com/meomkarjagtap/neukeiho/releases/download/${{ steps.version.outputs.VERSION }}/neukeiho-${{ steps.version.outputs.VERSION }}-arm
+            chmod +x neukeiho-${{ steps.version.outputs.VERSION }}-arm
+            sudo mv neukeiho-${{ steps.version.outputs.VERSION }}-arm /usr/bin/neukeiho
             neukeiho init
             neukeiho start
             ```
@@ -99,8 +128,9 @@ jobs:
             sha256sum -c checksums.txt
             ```
           files: |
-            dist/neukeiho-linux-amd64
-            dist/neukeiho-linux-arm64
+            dist/neukeiho-${{ steps.version.outputs.VERSION }}-x86_64
+            dist/neukeiho-${{ steps.version.outputs.VERSION }}-arm64
+            dist/neukeiho-${{ steps.version.outputs.VERSION }}-arm
             dist/checksums.txt
           draft: false
           prerelease: false
