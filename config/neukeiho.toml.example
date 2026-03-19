@@ -1,0 +1,41 @@
+[nodes]
+  [nodes.web-01]
+  host = "192.168.1.10"
+  tags = ["web", "production"]
+
+  [nodes.db-01]
+  host = "10.0.0.5"
+  tags = ["database", "production"]
+
+  [nodes.cloud-vm-01]
+  host = "34.100.200.1"
+  tags = ["cloud", "aws", "production"]
+
+[thresholds]
+cpu_percent    = 85.0
+memory_percent = 80.0
+disk_percent   = 90.0
+network_mbps   = 500.0
+
+[alerts]
+  [alerts.slack]
+  enabled     = true
+  webhook_url = "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+  bot_token   = "xoxb-your-bot-token"
+  channel     = "#infra-alerts"
+
+  [alerts.pagerduty]
+  enabled         = false
+  integration_key = "your-pagerduty-integration-key"
+
+  [alerts.email]
+  enabled   = false
+  smtp_host = "smtp.example.com"
+  smtp_port = 587
+  from      = "neukeiho@example.com"
+  to        = ["ops@example.com", "devops@example.com"]
+  password  = "your-smtp-password"
+
+  [alerts.webhook]
+  enabled = false
+  url     = "https://your-endpoint.com/neukeiho"

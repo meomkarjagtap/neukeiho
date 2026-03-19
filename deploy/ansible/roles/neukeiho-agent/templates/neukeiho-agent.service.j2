@@ -1,0 +1,14 @@
+[Unit]
+Description=NeuKeiho Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/neukeiho-agent --config /etc/neukeiho-agent/agent.conf
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:{{ agent_log_dir }}/agent.log
+StandardError=append:{{ agent_log_dir }}/agent.log
+
+[Install]
+WantedBy=multi-user.target

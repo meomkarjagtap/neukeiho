@@ -1,0 +1,10 @@
+[server]
+port = 9100
+log_path = /var/log/neukeiho/neukeiho.log
+retention_days = 30
+
+[ollama]
+enabled = false
+host = localhost
+port = 11434
+model = llama3

@@ -1,0 +1,56 @@
+---
+- name: Deploy neukeiho-agent to monitored nodes
+  hosts: neukeiho_nodes
+  become: true
+  vars:
+    agent_version: "0.1.0"
+    agent_binary: "neukeiho-agent"
+    agent_install_path: "/usr/bin/neukeiho-agent"
+    agent_config_dir: "/etc/neukeiho-agent"
+    agent_log_dir: "/var/log/neukeiho-agent"
+    controller_host: "{{ neukeiho_controller_host }}"
+    controller_port: "{{ neukeiho_controller_port | default('9100') }}"
+    push_interval_seconds: 10
+
+  tasks:
+    - name: Create neukeiho-agent config directory
+      file:
+        path: "{{ agent_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create neukeiho-agent log directory
+      file:
+        path: "{{ agent_log_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy neukeiho-agent binary
+      copy:
+        src: "{{ agent_binary }}"
+        dest: "{{ agent_install_path }}"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Write agent config
+      template:
+        src: agent.conf.j2
+        dest: "{{ agent_config_dir }}/agent.conf"
+        mode: '0644'
+
+    - name: Install systemd service
+      template:
+        src: neukeiho-agent.service.j2
+        dest: /etc/systemd/system/neukeiho-agent.service
+        mode: '0644'
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: true
+
+    - name: Enable and start neukeiho-agent
+      systemd:
+        name: neukeiho-agent
+        enabled: true
+        state: started
